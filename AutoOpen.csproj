@@ -82,14 +82,19 @@
     <ProjectReference Include="..\..\..\Core\Core.csproj">
       <Project>{5539d732-34a7-44ab-9e28-116c3429b12a}</Project>
       <Name>Core</Name>
+      <Private>False</Private>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="SharpDX">
       <Version>4.2.0</Version>
-    </PackageReference>
+	  <PrivateAssets>all</PrivateAssets>
+	  <ExcludeAssets>runtime</ExcludeAssets>
+	</PackageReference>
     <PackageReference Include="SharpDX.Mathematics">
       <Version>4.2.0</Version>
+	  <PrivateAssets>all</PrivateAssets>
+	  <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
