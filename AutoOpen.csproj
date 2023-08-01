@@ -7,7 +7,7 @@
     <OutputType>Library</OutputType>
     <UseWindowsForms>true</UseWindowsForms>
     <ImportWindowsDesktopTargets>true</ImportWindowsDesktopTargets>
-    <OutputPath>..\..\..\..\PoeHelper\Plugins\Compiled\AutoOpen\</OutputPath>
+    <OutputPath>..\..\..\..\..\PoeHelper\Plugins\Compiled\AutoOpen\</OutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Content Include="chestWhitelist.txt">
