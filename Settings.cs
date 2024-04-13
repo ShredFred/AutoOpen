@@ -3,63 +3,28 @@ using ExileCore.Shared.Attributes;
 using ExileCore.Shared.Interfaces;
 using ExileCore.Shared.Nodes;
 
-namespace AutoOpen
+namespace AutoOpen;
+
+public class Settings : ISettings
 {
-    public class Settings : ISettings
-    {
+    public ToggleNode Enable { get; set; } = new(false);
 
-        public Settings()
-        {
-            Enable = new ToggleNode(false);
-            Speed = new RangeNode<int>(1, 0, 100);
-            BlockInput = new ToggleNode(true);
+    [Menu("Blacklist|Whitelist Key")]
+    public HotkeyNode ToggleEntityKey { get; set; } = new(Keys.V);
 
-            doors = new ToggleNode(true);
-            switches = new ToggleNode(true);
-            chests = new ToggleNode(true);
-            shrines = new ToggleNode(true);
+    public ToggleNode BlockInputWhenClicking { get; set; } = new(true);
+    public RangeNode<int> ClickDelay { get; set; } = new(1, 0, 100);
 
-            doorDistance = new RangeNode<int>(150, 0, 300);
-            switchDistance = new RangeNode<int>(150, 0, 300);
-            chestDistance = new RangeNode<int>(150, 0, 300);
-            toggleEntityKey = new HotkeyNode(Keys.V);
-            shrineDistance = new RangeNode<int>(150, 0, 300);
-        }
+    public TypeSettings DoorSettings { get; set; } = new();
+    [Menu("Switches/Levers")]
+    public TypeSettings SwitchSettings { get; set; } = new();
+    public TypeSettings ChestSettings { get; set; } = new();
+    public TypeSettings ShrineSettings { get; set; } = new();
+}
 
-        [Menu("Enable")]
-        public ToggleNode Enable { get; set; }
-
-        [Menu("Blacklist|Whitelist Key")]
-        public HotkeyNode toggleEntityKey { get; set; }
-
-        [Menu("Block User Input")]
-        public ToggleNode BlockInput { get; set; }
-
-        [Menu("Click Delay")]
-        public RangeNode<int> Speed { get; set; }
-
-        [Menu("Doors", 1000)]
-        public ToggleNode doors { get; set; }
-
-        [Menu("Distance", 1001, 1000)]
-        public RangeNode<int> doorDistance { get; set; }
-
-        [Menu("Switches/Levers", 2000)]
-        public ToggleNode switches { get; set; }
-
-        [Menu("Distance", 2001, 2000)]
-        public RangeNode<int> switchDistance { get; set; }
-
-        [Menu("Chests", 3000)]
-        public ToggleNode chests { get; set; }
-
-        [Menu("Distance", 3002, 3000)]
-        public RangeNode<int> chestDistance { get; set; }
-
-        [Menu("Shrines", 4000)]
-        public ToggleNode shrines { get; set; }
-
-        [Menu("Distance", 4001, 4000)]
-        public RangeNode<int> shrineDistance { get; set; }
-    }
+[Submenu]
+public class TypeSettings
+{
+    public ToggleNode Open { get; set; } = new(true);
+    public RangeNode<int> MaxDistance { get; set; } = new(150, 0, 300);
 }

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Windows.Forms;
 using AutoOpen.Utils;
@@ -11,339 +12,246 @@ using ExileCore.PoEMemory.MemoryObjects;
 using ExileCore.Shared.Enums;
 using ExileCore.Shared.Helpers;
 using SharpDX;
+using Vector2 = System.Numerics.Vector2;
 
-namespace AutoOpen
+namespace AutoOpen;
+
+public class AutoOpen : BaseSettingsPlugin<Settings>
 {
-    public class AutoOpen : BaseSettingsPlugin<Settings>
+    private IngameState IngameState => GameController.Game.IngameState;
+    private Vector2 WindowOffset => GameController.Window.GetWindowRectangleTimeCache.TopLeft.ToVector2Num();
+    private readonly Dictionary<long, int> _clickedEntities = [];
+    private List<string> _doorBlacklist;
+    private List<string> _switchBlacklist;
+    private List<string> _chestWhitelist;
+
+    public override bool Initialise()
     {
-        private IngameState ingameState;
-        private readonly Dictionary<long, int> clickedEntities = new Dictionary<long, int>();
-        private Vector2 windowOffset;
-        private List<string> doorBlacklist;
-        private List<string> switchBlacklist;
-        private List<string> chestWhitelist;
+        _doorBlacklist = LoadFile("doorBlacklist.txt");
+        _switchBlacklist = LoadFile("switchBlacklist.txt");
+        _chestWhitelist = LoadFile("chestWhitelist.txt");
+        return true;
+    }
 
-        public override bool Initialise()
+    public override void Render()
+    {
+        var toggleHotkeyPressed = Settings.ToggleEntityKey.PressedOnce();
+        var camera = IngameState.Camera;
+        var playerPos = GameController.Player.PosNum;
+        var prevMousePosition = Input.ForceMousePositionNum;
+
+        if (!new[] { Settings.DoorSettings, Settings.ChestSettings, Settings.ShrineSettings, Settings.SwitchSettings }.Any(x => x.Open))
         {
-            base.Initialise();
-            Name = "AutoOpen";
-
-            ingameState = GameController.Game.IngameState;
-            windowOffset = GameController.Window.GetWindowRectangle().TopLeft;
-            loadDoorBlacklist();
-            loadSwitchBlacklist();
-            loadChestWhitelist();
-            return true;
+            return;
         }
 
-        public override void Render()
-        {
-            if (!Settings.Enable) return;
-            open();
-        }
+        var entities = GameController.EntityListWrapper.OnlyValidEntities
+            .Where(entity => entity.HasComponent<Render>() &&
+                             entity.Address != GameController.Player.Address &&
+                             entity.IsValid &&
+                             entity.IsTargetable &&
+                             (entity.HasComponent<TriggerableBlockage>() ||
+                              entity.HasComponent<Transitionable>() ||
+                              entity.HasComponent<Chest>() ||
+                              entity.HasComponent<Shrine>() ||
+                              entity.Path.Contains("darkshrine", StringComparison.OrdinalIgnoreCase)));
 
-        private void open()
+        foreach (var entity in entities)
         {
-            var camera = ingameState.Camera;
-            var playerPos = GameController.Player.Pos;
-            var prevMousePosition = Mouse.GetCursorPosition();
-
-            var entities = GameController.Entities
-                .Where(entity => entity.HasComponent<Render>() &&
-                                 entity.Address != GameController.Player.Address &&
-                                 entity.IsValid &&
-                                 entity.IsTargetable &&
-                                 (entity.HasComponent<TriggerableBlockage>() ||
-                                  entity.HasComponent<Transitionable>() ||
-                                  entity.HasComponent<Chest>() ||
-                                  entity.HasComponent<Shrine>() ||
-                                  entity.Path.ToLower().Contains("darkshrine")));
-            
-            foreach (var entity in entities)
+            var entityPos = entity.PosNum;
+            var entityDistanceToPlayer = (playerPos - entityPos).Length();
+            if (!entity.TryGetComponent<Targetable>(out var targetableComp))
             {
-                var entityPos = entity.Pos;
-                var entityScreenPos = camera.WorldToScreen(entityPos.Translate(0, 0, 0));
-                var entityDistanceToPlayer =
-                    Math.Sqrt(Math.Pow(playerPos.X - entityPos.X, 2) + Math.Pow(playerPos.Y - entityPos.Y, 2));
+                _clickedEntities.Remove(entity.Address);
+                continue;
+            }
 
-                var isTargetable = entity.GetComponent<Targetable>().isTargetable;
-                var isTargeted = entity.GetComponent<Targetable>().isTargeted;
+            var entityScreenPos = camera.WorldToScreen(entityPos);
+            var isTargeted = targetableComp.isTargeted;
 
-                //Doors
-                if (Settings.doors)
+            if (Settings.DoorSettings.Open &&
+                entity.HasComponent<TriggerableBlockage>() &&
+                entity.Path.Contains("door", StringComparison.OrdinalIgnoreCase))
+            {
+                var isClosed = entity.GetComponent<TriggerableBlockage>().IsClosed;
+
+                var isBlacklisted = _doorBlacklist != null && _doorBlacklist.Contains(entity.Path);
+                if (!isBlacklisted)
+                    Graphics.DrawText(isClosed ? "closed" : "opened",
+                        entityScreenPos,
+                        isClosed ? Color.Red : Color.Green,
+                        FontAlign.Center);
+
+                if (isTargeted && toggleHotkeyPressed)
+                    ToggleDoorBlacklistItem(entity.Path);
+
+                if (!isBlacklisted && isClosed && Control.MouseButtons == MouseButtons.Left)
                 {
-                    var isBlacklisted = doorBlacklist != null && doorBlacklist.Contains(entity.Path);
+                    Open(entity, entityDistanceToPlayer, entityScreenPos, prevMousePosition, Settings.DoorSettings.MaxDistance);
+                }
+            }
 
+            if (Settings.SwitchSettings.Open &&
+                entity.HasComponent<Transitionable>() &&
+                !entity.HasComponent<TriggerableBlockage>() &&
+                entity.Path.Contains("switch", StringComparison.OrdinalIgnoreCase))
+            {
+                var isBlacklisted = _switchBlacklist != null && _switchBlacklist.Contains(entity.Path);
+                var switchState = entity.GetComponent<Transitionable>().Flag1;
+                var switched = switchState != 1;
 
-                    if (entity.HasComponent<TriggerableBlockage>() && entity.HasComponent<Targetable>() &&
-                        entity.Path.ToLower().Contains("door"))
-                    {
-                        var isClosed = entity.GetComponent<TriggerableBlockage>().IsClosed;
-
-                        var s = isClosed ? "closed" : "opened";
-                        var c = isClosed ? Color.Red : Color.Green;
-
-                        if (!isBlacklisted) Graphics.DrawText(s, entityScreenPos, c, FontAlign.Center);
-
-                        if (isTargeted)
-                            if (Keyboard.IsKeyPressed((int) Settings.toggleEntityKey.Value))
-                                toggleDoorBlacklistItem(entity.Path);
-
-                        if (Control.MouseButtons == MouseButtons.Left)
-                        {
-                            var clickCount = getEntityClickedCount(entity);
-                            if (!isBlacklisted && entityDistanceToPlayer <= Settings.doorDistance && isClosed &&
-                                clickCount <= 15)
-                            {
-                                open(entityScreenPos, prevMousePosition);
-                                clickedEntities[entity.Address] = clickCount + 1;
-                                if (Settings.BlockInput) Mouse.blockInput(true);
-                            }
-                            else if (!isBlacklisted && entityDistanceToPlayer >= Settings.doorDistance &&
-                                     isClosed && clickCount >= 15)
-                            {
-                                clickedEntities.Clear();
-                            }
-
-                            if (Settings.BlockInput) Mouse.blockInput(false);
-                        }
-                    }
+                if (!isBlacklisted)
+                {
+                    var count = 1;
+                    Graphics.DrawText(isTargeted ? "targeted" : "not targeted",
+                        entityScreenPos.Translate(0, count * 16),
+                        isTargeted ? Color.Green : Color.Red,
+                        FontAlign.Center);
+                    count++;
+                    Graphics.DrawText($"{(switched ? "switched" : "not switched")}:{switchState}",
+                        entityScreenPos.Translate(0, count * 16),
+                        switched ? Color.Green : Color.Red,
+                        FontAlign.Center);
+                    count++;
                 }
 
-                //Switches
-                if (Settings.switches)
+                if (isTargeted && toggleHotkeyPressed)
+                    ToggleSwitchBlacklistItem(entity.Path);
+
+                if (!isBlacklisted && !switched && Control.MouseButtons == MouseButtons.Left)
                 {
-                    var isBlacklisted = switchBlacklist != null && switchBlacklist.Contains(entity.Path);
+                    Open(entity, entityDistanceToPlayer, entityScreenPos, prevMousePosition, Settings.SwitchSettings.MaxDistance);
+                }
+            }
 
-                    if (entity.HasComponent<Transitionable>() && entity.HasComponent<Targetable>() &&
-                        !entity.HasComponent<TriggerableBlockage>() && entity.Path.ToLower().Contains("switch"))
+            if (Settings.ChestSettings.Open &&
+                (entity.HasComponent<Chest>() ||
+                 entity.Path.Contains("chest", StringComparison.OrdinalIgnoreCase)))
+            {
+                var isOpened = entity.GetComponent<Chest>().IsOpened;
+                var whitelisted = _chestWhitelist != null && _chestWhitelist.Contains(entity.Path);
+
+                if (isTargeted && toggleHotkeyPressed)
+                    ToggleChestWhitelistItem(entity.Path);
+
+                if (whitelisted && !isOpened)
+                {
+                    Graphics.DrawText("Open me!", entityScreenPos, Color.LimeGreen, FontAlign.Center);
+                    if (Control.MouseButtons == MouseButtons.Left)
                     {
-                        var switchState = entity.GetComponent<Transitionable>().Flag1;
-                        var switched = switchState != 1;
-
-                        var s = isTargeted ? "targeted" : "not targeted";
-                        var c = isTargeted ? Color.Green : Color.Red;
-
-                        if (!isBlacklisted)
-                        {
-                            var count = 1;
-                            Graphics.DrawText(s, entityScreenPos.Translate(0, count * 16), c, FontAlign.Center);
-                            count++;
-                            var s2 = switched ? "switched" : "not switched";
-                            var c2 = switched ? Color.Green : Color.Red;
-                            Graphics.DrawText(s2 + ":" + switchState, entityScreenPos.Translate(0, count * 16), c2,
-                                FontAlign.Center);
-                            count++;
-                        }
-
-                        if (isTargeted)
-                            if (Keyboard.IsKeyPressed((int) Settings.toggleEntityKey.Value))
-                                toggleSwitchBlacklistItem(entity.Path);
-
-                        if (Control.MouseButtons == MouseButtons.Left)
-                        {
-                            var clickCount = getEntityClickedCount(entity);
-                            if (!isBlacklisted && entityDistanceToPlayer <= Settings.switchDistance && !switched &&
-                                clickCount <= 15)
-                            {
-                                open(entityScreenPos, prevMousePosition);
-                                clickedEntities[entity.Address] = clickCount + 1;
-                                if (Settings.BlockInput) Mouse.blockInput(true);
-                            }
-                            else if (!isBlacklisted && entityDistanceToPlayer >= Settings.switchDistance &&
-                                     !switched && clickCount >= 15)
-                            {
-                                clickedEntities.Clear();
-                            }
-
-                            if (Settings.BlockInput) Mouse.blockInput(false);
-                        }
+                        Open(entity, entityDistanceToPlayer, entityScreenPos, prevMousePosition, Settings.ChestSettings.MaxDistance);
                     }
                 }
+            }
 
-                //Chests
-                if (Settings.chests)
-                    if (entity.HasComponent<Chest>() || entity.Path.ToLower().Contains("chest"))
-                    {
-                        var isOpened = entity.GetComponent<Chest>().IsOpened;
-                        var whitelisted = chestWhitelist != null && chestWhitelist.Contains(entity.Path);
-
-                        if (isTargetable && !isOpened && whitelisted)
-                            Graphics.DrawText("Open me!", entityScreenPos, Color.LimeGreen, FontAlign.Center);
-
-                        if (isTargeted)
-                            if (Keyboard.IsKeyPressed((int) Settings.toggleEntityKey.Value))
-                                toggleChestWhitelistItem(entity.Path);
-
-                        if (Control.MouseButtons == MouseButtons.Left)
-                        {
-                            var clickCount = getEntityClickedCount(entity);
-
-                            if (isTargetable && whitelisted && entityDistanceToPlayer <= Settings.chestDistance &&
-                                !isOpened && clickCount <= 15)
-                            {
-                                open(entityScreenPos, prevMousePosition);
-                                clickedEntities[entity.Address] = clickCount + 1;
-                                if (Settings.BlockInput) Mouse.blockInput(true);
-                            }
-                            else if (isTargetable && whitelisted &&
-                                     entityDistanceToPlayer >= Settings.chestDistance && !isOpened &&
-                                     clickCount >= 15)
-                            {
-                                clickedEntities.Clear();
-                            }
-
-                            if (Settings.BlockInput) Mouse.blockInput(false);
-                        }
-                    }
-
-                //Shrines
-                if (Settings.shrines)
-                    if (entity.HasComponent<Shrine>() || entity.Path.ToLower().Contains("darkshrine"))
-                    {
-                        var isAvailable = entity.GetComponent<Shrine>().IsAvailable;
-                        var whitelisted = chestWhitelist.Contains(entity.Path);
-
-                        if (isTargetable)
-                            Graphics.DrawText("Get me!", entityScreenPos, Color.LimeGreen, FontAlign.Center);
-
-                        if (Control.MouseButtons == MouseButtons.Left)
-                        {
-                            var clickCount = getEntityClickedCount(entity);
-
-                            if (isTargetable && entityDistanceToPlayer <= Settings.shrineDistance &&
-                                clickCount <= 15)
-                            {
-                                open(entityScreenPos, prevMousePosition);
-                                clickedEntities[entity.Address] = clickCount + 1;
-                                if (Settings.BlockInput) Mouse.blockInput(true);
-                            }
-                            else if (isTargetable && entityDistanceToPlayer >= Settings.shrineDistance &&
-                                     clickCount >= 15)
-                            {
-                                clickedEntities.Clear();
-                            }
-
-                            if (Settings.BlockInput) Mouse.blockInput(false);
-                        }
-                    }
+            if (Settings.ShrineSettings.Open &&
+                (entity.HasComponent<Shrine>() ||
+                 entity.Path.Contains("darkshrine", StringComparison.OrdinalIgnoreCase)))
+            {
+                Graphics.DrawText("Get me!", entityScreenPos, Color.LimeGreen, FontAlign.Center);
+                if (Control.MouseButtons == MouseButtons.Left)
+                {
+                    Open(entity, entityDistanceToPlayer, entityScreenPos, prevMousePosition, Settings.ShrineSettings.MaxDistance);
+                }
             }
         }
+    }
 
-        private int getEntityClickedCount(Entity entity)
+    private void Open(Entity entity, float entityDistanceToPlayer, Vector2 entityScreenPos, Vector2 prevMousePosition, double maxDistance)
+    {
+        if (entityDistanceToPlayer <= maxDistance)
         {
-            var clickCount = 0;
-            if (clickedEntities.ContainsKey(entity.Address))
-                clickCount = clickedEntities[entity.Address];
-            else
-                clickedEntities.Add(entity.Address, clickCount);
-            if (clickCount >= 15) LogMessage(entity.Path + " clicked too often!", 3);
-            return clickCount;
-        }
-
-        private void open(Vector2 entityScreenPos, Vector2 prevMousePosition)
-        {
-            entityScreenPos += windowOffset;
-            Mouse.moveMouse(entityScreenPos);
-            Mouse.LeftUp(0);
-            Mouse.LeftDown(0);
-            Mouse.LeftUp(0);
-            Mouse.moveMouse(prevMousePosition);
-            Mouse.LeftDown(0);
-            Thread.Sleep(Settings.Speed);
-        }
-
-        private void loadDoorBlacklist()
-        {
-            try
+            if (GetEntityClickedCount(entity) <= 15)
             {
-                doorBlacklist = File.ReadAllLines(DirectoryFullName + "\\doorBlacklist.txt").ToList();
-            }
-            catch (Exception)
-            {
-                File.Create(DirectoryFullName + "\\doorBlacklist.txt");
-                loadDoorBlacklist();
+                if (Settings.BlockInputWhenClicking) Mouse.blockInput(true);
+                try
+                {
+                    Mouse.MoveMouse(entityScreenPos + WindowOffset);
+                    Mouse.LeftUp(0);
+                    Mouse.LeftDown(0);
+                    Mouse.LeftUp(0);
+                    Mouse.MoveMouse(prevMousePosition);
+                    Mouse.LeftDown(0);
+                    Thread.Sleep(Settings.ClickDelay);
+                    _clickedEntities[entity.Address] = _clickedEntities.GetValueOrDefault(entity.Address) + 1;
+                }
+                finally
+                {
+                    if (Settings.BlockInputWhenClicking) Mouse.blockInput(false);
+                }
             }
         }
-
-        private void loadSwitchBlacklist()
+        else
         {
-            try
-            {
-                switchBlacklist = File.ReadAllLines(DirectoryFullName + "\\switchBlacklist.txt").ToList();
-            }
-            catch (Exception)
-            {
-                File.Create(DirectoryFullName + "\\switchBlacklist.txt");
-                loadSwitchBlacklist();
-            }
+            _clickedEntities.Remove(entity.Address);
         }
+    }
 
-        private void loadChestWhitelist()
-        {
-            try
-            {
-                chestWhitelist = File.ReadAllLines(DirectoryFullName + "\\chestWhitelist.txt").ToList();
-            }
-            catch (Exception)
-            {
-                File.Create(DirectoryFullName + "\\chestWhitelist.txt");
-                loadChestWhitelist();
-            }
-        }
+    private int GetEntityClickedCount(Entity entity)
+    {
+        if (!_clickedEntities.TryGetValue(entity.Address, out var clickCount))
+            _clickedEntities.Add(entity.Address, clickCount);
 
-        private void toggleDoorBlacklistItem(string name)
+        if (clickCount >= 15) LogMessage(entity.Path + " clicked too often!", 3);
+        return clickCount;
+    }
+
+    private List<string> LoadFile(string path)
+    {
+        try
         {
-            if (doorBlacklist.Contains(name))
+            var customPath = Path.Join(ConfigDirectory, path);
+            if (File.Exists(customPath))
             {
-                doorBlacklist.Remove(name);
-                LogMessage(name + " will now be opened", 5, Color.Green);
+                return File.ReadAllLines(customPath).ToList();
             }
             else
             {
-                doorBlacklist.Add(name);
-                LogMessage(name + " will now be ignored", 5, Color.Red);
+                using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(path);
+                using var reader = new StreamReader(stream);
+                return reader.ReadToEnd().Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).ToList();
             }
-
-            File.WriteAllLines(DirectoryFullName + "\\doorBlacklist.txt", doorBlacklist);
         }
-
-        private void toggleSwitchBlacklistItem(string name)
+        catch (Exception ex)
         {
-            if (switchBlacklist.Contains(name))
-            {
-                switchBlacklist.Remove(name);
-                LogMessage(name + " will now be opened", 5, Color.Green);
-            }
-            else
-            {
-                switchBlacklist.Add(name);
-                LogMessage(name + " will now be ignored", 5, Color.Red);
-            }
-
-            File.WriteAllLines(DirectoryFullName + "\\switchBlacklist.txt", switchBlacklist);
+            DebugWindow.LogError($"Cannot load {path}: {ex}");
         }
 
-        private void toggleChestWhitelistItem(string name)
+        return [];
+    }
+
+    private void ToggleDoorBlacklistItem(string name)
+    {
+        Toggle(_doorBlacklist, name, "doorBlacklist.txt", true);
+    }
+
+    private void ToggleSwitchBlacklistItem(string name)
+    {
+        Toggle(_switchBlacklist, name, "switchBlacklist.txt", true);
+    }
+
+    private void ToggleChestWhitelistItem(string name)
+    {
+        Toggle(_chestWhitelist, name, "chestWhitelist.txt", false);
+    }
+
+    private void Toggle(List<string> collection, string name, string path, bool isBlacklist)
+    {
+        if (collection.Remove(name))
         {
-            if (chestWhitelist.Contains(name))
-            {
-                chestWhitelist.Remove(name);
-                LogMessage(name + " will now be ignored", 5, Color.Red);
-            }
-            else
-            {
-                chestWhitelist.Add(name);
-                LogMessage(name + " will now be opened", 5, Color.Green);
-            }
-
-            File.WriteAllLines(DirectoryFullName + "\\chestWhitelist.txt", chestWhitelist);
+            LogMessage($"{name} will now be {(isBlacklist ? "opened" : "ignored")}", 5, Color.Red);
         }
-
-        public override void AreaChange(AreaInstance area)
+        else
         {
-            clickedEntities.Clear();
-            base.AreaChange(area);
+            collection.Add(name);
+            LogMessage($"{name} will now be {(isBlacklist ? "ignored" : "opened")}", 5, Color.Green);
         }
+
+        File.WriteAllLines(Path.Join(ConfigDirectory, path), _chestWhitelist);
+    }
+
+    public override void AreaChange(AreaInstance area)
+    {
+        _clickedEntities.Clear();
     }
 }
