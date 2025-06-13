@@ -13,6 +13,7 @@ public class Settings : ISettings
     public HotkeyNode ToggleEntityKey { get; set; } = new(Keys.V);
 
     public ToggleNode BlockInputWhenClicking { get; set; } = new(true);
+    public ToggleNode UseMagicInput { get; set; } = new(false);
     public RangeNode<int> ClickDelay { get; set; } = new(1, 0, 100);
 
     public TypeSettings DoorSettings { get; set; } = new();

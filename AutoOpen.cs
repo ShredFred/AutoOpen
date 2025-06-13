@@ -71,7 +71,8 @@ public class AutoOpen : BaseSettingsPlugin<Settings>
 
             if (Settings.DoorSettings.Open &&
                 entity.HasComponent<TriggerableBlockage>() &&
-                entity.Path.Contains("door", StringComparison.OrdinalIgnoreCase))
+                entity.Path.Contains("door", StringComparison.OrdinalIgnoreCase) &&
+                !entity.Path.Contains("door_npc", StringComparison.OrdinalIgnoreCase))
             {
                 var isClosed = entity.GetComponent<TriggerableBlockage>().IsClosed;
 
@@ -163,21 +164,31 @@ public class AutoOpen : BaseSettingsPlugin<Settings>
         {
             if (GetEntityClickedCount(entity) <= 15)
             {
-                if (Settings.BlockInputWhenClicking) Mouse.blockInput(true);
-                try
+                if (Settings.UseMagicInput)
                 {
-                    Mouse.MoveMouse(entityScreenPos + WindowOffset);
                     Mouse.LeftUp(0);
+                    GameController.PluginBridge.GetMethod<Action<Entity, uint>>("MagicInput.CastSkillWithTarget")(entity, 0x400);
                     Mouse.LeftDown(0);
-                    Mouse.LeftUp(0);
-                    Mouse.MoveMouse(prevMousePosition);
-                    Mouse.LeftDown(0);
-                    Thread.Sleep(Settings.ClickDelay);
                     _clickedEntities[entity.Address] = _clickedEntities.GetValueOrDefault(entity.Address) + 1;
                 }
-                finally
+                else
                 {
-                    if (Settings.BlockInputWhenClicking) Mouse.blockInput(false);
+                    if (Settings.BlockInputWhenClicking) Mouse.blockInput(true);
+                    try
+                    {
+                        Mouse.MoveMouse(entityScreenPos + WindowOffset);
+                        Mouse.LeftUp(0);
+                        Mouse.LeftDown(0);
+                        Mouse.LeftUp(0);
+                        Mouse.MoveMouse(prevMousePosition);
+                        Mouse.LeftDown(0);
+                        Thread.Sleep(Settings.ClickDelay);
+                        _clickedEntities[entity.Address] = _clickedEntities.GetValueOrDefault(entity.Address) + 1;
+                    }
+                    finally
+                    {
+                        if (Settings.BlockInputWhenClicking) Mouse.blockInput(false);
+                    }
                 }
             }
         }
