@@ -204,7 +204,7 @@ public class AutoOpen : BaseSettingsPlugin<Settings>
         if (!_clickedEntities.TryGetValue(entity.Address, out var clickCount))
             _clickedEntities.Add(entity.Address, clickCount);
 
-        if (clickCount >= 15) LogMessage(entity.Path + " clicked too often!", 3);
+        if (clickCount >= 30) LogMessage(entity.Path + " clicked too often!", 3);
         return clickCount;
     }
 
