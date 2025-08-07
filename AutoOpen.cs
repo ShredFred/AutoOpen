@@ -163,7 +163,7 @@ public class AutoOpen : BaseSettingsPlugin<Settings>
     {
         if (entityDistanceToPlayer <= maxDistance)
         {
-            if (GetEntityClickedCount(entity) <= 15)
+            if (GetEntityClickedCount(entity) <= 30)
             {
                 if (Settings.UseMagicInput)
                 {
