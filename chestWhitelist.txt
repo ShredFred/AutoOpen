@@ -1,3 +1,4 @@
+Metadata/Chests/AbyssChestsMaps01
 Metadata/Chests/Abyss/AbyssFinalChest
 Metadata/Chests/Abyss/AbyssFinalChest1
 Metadata/Chests/Abyss/AbyssFinalChest2
