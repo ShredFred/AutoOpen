@@ -50,6 +50,7 @@ public class AutoOpen : BaseSettingsPlugin<Settings>
                              entity.Address != GameController.Player.Address &&
                              entity.IsValid &&
                              entity.IsTargetable &&
+                             !entity.HasComponent<Monster>() &&
                              (entity.HasComponent<TriggerableBlockage>() ||
                               entity.HasComponent<Transitionable>() ||
                               entity.HasComponent<Chest>() ||
